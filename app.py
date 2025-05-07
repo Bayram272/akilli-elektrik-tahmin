@@ -48,7 +48,7 @@ if file is not None:
     # Veri ölçeklendirme
     scaler = MinMaxScaler(feature_range=(0, 1))
     scaled_data = scaler.fit_transform(df[["Tüketim"]])
-    if len(scaled_data) <= time_step:
+if len(scaled_data) <= time_step:
     st.error(f"⚠️ Tahmin için en az {time_step + 1} günlük veri gerekir. Lütfen daha uzun bir veri dosyası yükleyin.")
     st.stop()
 
