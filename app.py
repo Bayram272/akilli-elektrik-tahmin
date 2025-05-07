@@ -6,27 +6,28 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense
 
-st.set_page_config(page_title="Akıllı Elektrik Tüketimi Tahmini", layout="wide")
+st.set_page_config(page_title="Yapay Zeka Tabanlı Elektrik Tüketimi Tahmini", layout="wide")
 
-# Şık stil
+# Şık ve sade stil
 st.markdown("""
     <style>
-    .main {
+    body {
         background-color: #f0f2f6;
+    }
+    .main {
         padding: 20px;
     }
     .title {
-        color: #1f77b4;
         font-size: 36px;
         font-weight: bold;
+        color: #0c4b75;
     }
     .subtitle {
         font-size: 20px;
-        color: #333;
-        margin-bottom: 10px;
+        color: #444;
     }
-    .stButton>button {
-        background-color: #1f77b4;
+    .stButton > button {
+        background-color: #0c4b75;
         color: white;
         border-radius: 10px;
         padding: 10px 20px;
@@ -34,34 +35,39 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<div class='title'>🌌 Yapay Zeka Destekli Elektrik Tüketimi Tahmini</div>", unsafe_allow_html=True)
+# Başlık
+st.markdown("<div class='title'>🚀 Elektrik Tüketimi Tahmin Uygulaması (LSTM)</div>", unsafe_allow_html=True)
 
+# Dosya yükleme
 st.markdown("---")
-st.markdown("<div class='subtitle'>📁 Excel (.xlsx) Dosyası Yükleyin</div>", unsafe_allow_html=True)
-file = st.file_uploader("Excel dosyası (.xlsx) yükleyin (Tarih ve Tüketim sütunlarıyla)", type=["xlsx"])
+st.subheader("📁 Excel (.xlsx) Dosyası Yükleyin")
+file = st.file_uploader("Excel dosyası yükleyin (Tarih ve Tüketim sütunlarıyla)", type="xlsx")
 
 if file is not None:
     try:
         df = pd.read_excel(file)
+
+        # Veriyi kontrol et
+        if "Tarih" not in df.columns or "Tüketim" not in df.columns:
+            st.error("Excel dosyanızda 'Tarih' ve 'Tüketim' adlı sütunlar bulunmalı.")
+            st.stop()
+
         df["Tarih"] = pd.to_datetime(df["Tarih"])
         df = df.sort_values("Tarih")
         df.set_index("Tarih", inplace=True)
 
-        st.markdown("---")
-        st.subheader("📊 Gerçek Tüketim Grafiği")
-        st.line_chart(df["Tüketim"])
+        st.line_chart(df["Tüketim"], height=300)
 
-        # LSTM model için hazırlık
+        # Normalizasyon
         scaler = MinMaxScaler(feature_range=(0, 1))
         scaled_data = scaler.fit_transform(df[["Tüketim"]])
 
         time_step = 5
         if len(scaled_data) <= time_step:
-            st.error(f"⚠️ Tahmin için en az {time_step + 1} günlük veri gerekir. Daha uzun veri yükleyin.")
+            st.error(f"⚠️ Tahmin için en az {time_step + 1} satır veri gerekir. Lütfen daha uzun veri yükleyin.")
             st.stop()
 
-        # X, y oluştur
-        def create_dataset(data, time_step=1):
+        def create_dataset(data, time_step):
             X, y = [], []
             for i in range(len(data) - time_step):
                 X.append(data[i:(i + time_step), 0])
@@ -72,37 +78,39 @@ if file is not None:
         X = X.reshape((X.shape[0], X.shape[1], 1))
 
         model = Sequential()
-        model.add(LSTM(50, return_sequences=False, input_shape=(X.shape[1], 1)))
+        model.add(LSTM(50, return_sequences=False, input_shape=(time_step, 1)))
         model.add(Dense(1))
         model.compile(optimizer='adam', loss='mean_squared_error')
         model.fit(X, y, epochs=10, batch_size=16, verbose=0)
 
-        # Tahmin
-        inputs = scaled_data[-time_step:].reshape(1, time_step, 1)
+        # 7 gün tahmin
+        input_seq = scaled_data[-time_step:].reshape(1, time_step, 1)
         predictions = []
-        for _ in range(7):
-            pred = model.predict(inputs, verbose=0)
-            predictions.append(pred[0][0])
-            inputs = np.append(inputs[:, 1:, :], [[pred]], axis=1)
 
-        future = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
-        future_dates = pd.date_range(df.index[-1] + pd.Timedelta(days=1), periods=7)
-        df_future = pd.DataFrame({"Tarih": future_dates, "Tahmin": future.flatten()})
+        for _ in range(7):
+            pred = model.predict(input_seq, verbose=0)[0][0]
+            predictions.append(pred)
+            input_seq = np.append(input_seq[:, 1:, :], [[[pred]]], axis=1)
+
+        future_predictions = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
+        future_dates = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=7)
+
+        df_future = pd.DataFrame({"Tarih": future_dates, "Tahmin": future_predictions.flatten()})
         df_future.set_index("Tarih", inplace=True)
 
         st.markdown("---")
-        st.subheader("🔍 7 Günlük LSTM Tahmini")
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.plot(df.index, df["Tüketim"], label="Gerçek", color="#1f77b4")
-        ax.plot(df_future.index, df_future["Tahmin"], label="Tahmin", color="#2ca02c")
+        st.subheader("🔍 Tahmin Grafiği")
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(df.index, df["Tüketim"], label="Geçmiş Verisi", color="#1f77b4")
+        ax.plot(df_future.index, df_future["Tahmin"], label="Tahmin", color="#ff7f0e")
         ax.legend()
-        ax.set_xlabel("Tarih")
         ax.set_ylabel("Tüketim (kWh)")
+        ax.set_xlabel("Tarih")
         st.pyplot(fig)
 
-        st.success("✅ Tahmin başarıyla tamamlandı.")
+        st.success("🌟 Tahmin başarıyla tamamlandı ve görüntülendi.")
 
     except Exception as e:
-        st.error(f"Hata oluştu: {str(e)}")
+        st.error(f"Bir hata oluştu: {e}")
 else:
-    st.info("Lütfen bir Excel dosyası yükleyiniz.")
+    st.info("Lütfen .xlsx uzantılı bir dosya yükleyin. 'Tarih' ve 'Tüketim' sütunları zorunludur.")
