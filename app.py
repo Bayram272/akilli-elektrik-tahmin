@@ -3,98 +3,95 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
-from tensorflow.keras.models import load_model
-import joblib
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
 
-st.set_page_config(page_title="Elektrik Tüketimi Tahmini", layout="wide")
+st.set_page_config(page_title="Akıllı Elektrik Tüketimi Tahmini", layout="wide")
 
-st.title("⚡ Yapay Zeka ile Elektrik Tüketimi Tahmini")
-st.write("Bu uygulama, geçmiş verilere göre gelecekteki elektrik tüketimini LSTM modeli ile tahmin eder.")
+# Sayfa Başlığı ve Stil
+st.markdown("""
+    <style>
+    body {
+        background-color: #f5f5f5;
+    }
+    .main {
+        padding: 20px;
+        background-color: #ffffff;
+        border-radius: 10px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+    .title {
+        color: #2c3e50;
+        font-size: 36px;
+        font-weight: bold;
+        margin-bottom: 20px;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("📁 Lütfen veri dosyanızı (CSV) yükleyin", type=["csv"])
+st.markdown("<div class='title'>🔌 Yapay Zeka Destekli Elektrik Tüketimi Tahmini</div>", unsafe_allow_html=True)
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    
-    st.subheader("🔍 Veri Önizlemesi")
-    st.dataframe(df.head())
+# Veri Yükleme
+st.subheader("📁 CSV Verisi Yükleyin")
+file = st.file_uploader("Tarih ve Tüketim içeren bir .csv dosyası yükleyin", type="csv")
 
-    st.write("Veri setiniz şu sütunlara sahip olmalı: `Tarih` ve `Tüketim`")
+if file is not None:
+    df = pd.read_csv(file)
+    df["Tarih"] = pd.to_datetime(df["Tarih"])
+    df = df.sort_values("Tarih")
+    df.set_index("Tarih", inplace=True)
 
-    # Tarihi datetime formatına çevir
-    df['Tarih'] = pd.to_datetime(df['Tarih'])
-    df = df.sort_values('Tarih')
-    df.set_index('Tarih', inplace=True)
+    st.markdown("---")
+    st.subheader("📊 Tüketim Verisi Grafiği")
+    st.line_chart(df["Tüketim"])
 
-    # Anomali tespiti (z-score yöntemi)
-    st.subheader("📊 Anomali Tespiti")
-    df['Z-Score'] = (df['Tüketim'] - df['Tüketim'].mean()) / df['Tüketim'].std()
-    df['Anomali'] = df['Z-Score'].abs() > 2.5
-    st.write(f"Toplam {df['Anomali'].sum()} anomali tespit edildi.")
+    # Veri ölçeklendirme
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(df[["Tüketim"]])
 
-    # Grafik
-    fig, ax = plt.subplots(figsize=(12, 5))
-    ax.plot(df.index, df['Tüketim'], label="Tüketim", color='blue')
-    ax.scatter(df[df['Anomali']].index, df[df['Anomali']]['Tüketim'], color='red', label="Anomali")
-    ax.legend()
-    st.pyplot(fig)
-
-    # Normalizasyon
-    scaler = MinMaxScaler()
-    df['Tüketim_norm'] = scaler.fit_transform(df[['Tüketim']])
-
-    # LSTM için veri hazırlığı
-    def create_sequences(data, step=30):
+    # LSTM için veri hazırlama
+    def create_dataset(data, time_step=5):
         X, y = [], []
-        for i in range(step, len(data)):
-            X.append(data[i-step:i])
-            y.append(data[i])
+        for i in range(len(data)-time_step):
+            X.append(data[i:(i+time_step), 0])
+            y.append(data[i+time_step, 0])
         return np.array(X), np.array(y)
 
-    sequence_length = 30
-    data = df['Tüketim_norm'].values
-    X, y = create_sequences(data, sequence_length)
+    time_step = 5
+    X, y = create_dataset(scaled_data, time_step)
+    X = X.reshape((X.shape[0], X.shape[1], 1))
 
-    # Model (burada örnek model eğitimi yapılıyor)
-    from tensorflow.keras.models import Sequential
-    from tensorflow.keras.layers import LSTM, Dense
+    # LSTM Modeli
+    model = Sequential()
+    model.add(LSTM(50, return_sequences=False, input_shape=(X.shape[1], 1)))
+    model.add(Dense(1))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.fit(X, y, epochs=10, batch_size=16, verbose=0)
 
-    st.subheader("🤖 Model Eğitimi")
-    model = Sequential([
-        LSTM(64, return_sequences=True, input_shape=(sequence_length, 1)),
-        LSTM(32),
-        Dense(1)
-    ])
-    model.compile(optimizer='adam', loss='mse')
-    model.fit(X.reshape(X.shape[0], X.shape[1], 1), y, epochs=10, batch_size=16, verbose=0)
-
-    st.success("Model başarıyla eğitildi!")
-
-    # Tahmin
-    st.subheader("📈 Gelecek Tüketim Tahmini")
-    last_sequence = data[-sequence_length:]
+    # Gelecek tahmin (7 gün)
+    inputs = scaled_data[-time_step:].reshape(1, time_step, 1)
     predictions = []
-
     for _ in range(7):
-        seq_input = last_sequence[-sequence_length:].reshape(1, sequence_length, 1)
-        pred = model.predict(seq_input)[0][0]
-        predictions.append(pred)
-        last_sequence = np.append(last_sequence, pred)
+        pred = model.predict(inputs, verbose=0)
+        predictions.append(pred[0][0])
+        inputs = np.append(inputs[:, 1:, :], [[pred]], axis=1)
 
-    future_values = scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
-
-    future_dates = pd.date_range(start=df.index[-1] + pd.Timedelta(days=1), periods=7)
-
-    result_df = pd.DataFrame({
-        'Tarih': future_dates,
-        'Tahmin Tüketim': future_values
-    })
-
-    st.dataframe(result_df)
+    # Tahmini veriyi ters ölçeklendir
+    future = scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
+    future_dates = pd.date_range(df.index[-1] + pd.Timedelta(days=1), periods=7)
+    df_future = pd.DataFrame({"Tarih": future_dates, "Tahmin": future.flatten()})
+    df_future.set_index("Tarih", inplace=True)
 
     # Grafik
-    fig2, ax2 = plt.subplots(figsize=(12, 5))
-    ax2.plot(df.index, df['Tüketim'], label="Geçmiş Tüketim", color='gray')
-    ax2.plot(result_df['Tarih'], result_df['Tahmin Tüketim'], label="Tahmin", color='green')
-    ax2.legend()
-    st.pyplot(fig2)
+    st.markdown("---")
+    st.subheader("🔍 7 Günlük Tahmin")
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(df.index, df["Tüketim"], label="Geçmiş Verisi", color="blue")
+    ax.plot(df_future.index, df_future["Tahmin"], label="Tahmin", color="green")
+    ax.legend()
+    ax.set_ylabel("kWh")
+    ax.set_xlabel("Tarih")
+    st.pyplot(fig)
+
+else:
+    st.info("📅 Tahmin için CSV dosyası yükleyiniz.")
