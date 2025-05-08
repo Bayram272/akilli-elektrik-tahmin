@@ -51,7 +51,6 @@ if file:
             st.warning(f"⚠️ En az {time_step + 1} satırlık veri gerekir.")
             st.stop()
 
-        # Dataset oluştur
         def create_dataset(data, step):
             X, y = [], []
             for i in range(len(data) - step):
@@ -62,14 +61,12 @@ if file:
         X, y = create_dataset(scaled, time_step)
         X = X.reshape((X.shape[0], time_step, 1))
 
-        # Model
         model = Sequential()
         model.add(LSTM(50, input_shape=(time_step, 1)))
         model.add(Dense(1))
         model.compile(optimizer="adam", loss="mse")
         model.fit(X, y, epochs=10, batch_size=16, verbose=0)
 
-        # Tahmin
         input_seq = scaled[-time_step:].reshape(1, time_step, 1)
         predictions = []
         for _ in range(7):
